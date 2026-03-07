@@ -11,6 +11,8 @@ export interface SecDigestConfig {
     security: number;
     ai: number;
   };
+  email_to?: string;
+  twitter_enabled?: boolean;
 }
 
 export const DEFAULT_CONFIG: SecDigestConfig = {

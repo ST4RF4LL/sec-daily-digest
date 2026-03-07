@@ -52,6 +52,7 @@ export async function summarizeSelectedArticles(options: SummarizeSelectedOption
                 link: article.link,
                 category: article.category,
                 keywords: article.keywords,
+                fullText: (article as { fullText?: string }).fullText,
               })),
               options.lang,
             );

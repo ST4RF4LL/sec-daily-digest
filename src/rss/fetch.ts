@@ -74,30 +74,39 @@ export async function fetchFeed(
   return [];
 }
 
+export interface FeedResult {
+  id: string;
+  name: string;
+  ok: boolean;
+}
+
 export async function fetchAllFeeds(
   feeds: FeedSource[],
   options?: {
     concurrency?: number;
     fetcher?: typeof fetch;
   },
-): Promise<Article[]> {
+): Promise<{ articles: Article[]; results: FeedResult[] }> {
   const concurrency = options?.concurrency ?? 10;
-  const all: Article[] = [];
+  const allArticles: Article[] = [];
+  const allResults: FeedResult[] = [];
 
   for (let i = 0; i < feeds.length; i += concurrency) {
     const batch = feeds.slice(i, i + concurrency);
-    const results = await Promise.all(
-      batch.map((feed, index) =>
-        fetchFeed(feed, {
+    const batchResults = await Promise.all(
+      batch.map(async (feed, index) => {
+        const articles = await fetchFeed(feed, {
           fetcher: options?.fetcher,
           seed: i + index,
-        }),
-      ),
+        });
+        return { feed, articles };
+      }),
     );
-    for (const items of results) {
-      all.push(...items);
+    for (const { feed, articles } of batchResults) {
+      allArticles.push(...articles);
+      allResults.push({ id: feed.xmlUrl, name: feed.name, ok: articles.length > 0 });
     }
   }
 
-  return all;
+  return { articles: allArticles, results: allResults };
 }

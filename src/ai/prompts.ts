@@ -6,6 +6,7 @@ export interface ScoringPromptArticle {
   description: string;
   sourceName: string;
   link: string;
+  fullText?: string;
 }
 
 export interface SummaryPromptArticle {
@@ -16,6 +17,7 @@ export interface SummaryPromptArticle {
   link: string;
   category: CategoryId;
   keywords: string[];
+  fullText?: string;
 }
 
 export interface HighlightsPromptArticle {
@@ -27,10 +29,13 @@ export interface HighlightsPromptArticle {
 
 export function buildScoringPrompt(articles: ScoringPromptArticle[]): string {
   const articleList = articles
-    .map(
-      (article) =>
-        `Index ${article.index}: [${article.sourceName}] ${article.title}\nURL: ${article.link}\n${article.description.slice(0, 800)}`,
-    )
+    .map((article) => {
+      let entry = `Index ${article.index}: [${article.sourceName}] ${article.title}\nURL: ${article.link}\n${article.description.slice(0, 800)}`;
+      if (article.fullText) {
+        entry += `\n\n[Full text excerpt]\n${article.fullText.slice(0, 500)}`;
+      }
+      return entry;
+    })
     .join("\n\n---\n\n");
 
   return `你是网络空间安全研究员助手。请为以下文章进行多维评分、分类和关键词提取。
@@ -77,10 +82,13 @@ ${articleList}
 
 export function buildSummaryPrompt(articles: SummaryPromptArticle[], lang: "zh" | "en"): string {
   const articleList = articles
-    .map(
-      (article) =>
-        `Index ${article.index}: [${article.sourceName}] ${article.title}\nURL: ${article.link}\nCategory: ${article.category}\nKeywords: ${article.keywords.join(", ")}\n${article.description.slice(0, 1200)}`,
-    )
+    .map((article) => {
+      let entry = `Index ${article.index}: [${article.sourceName}] ${article.title}\nURL: ${article.link}\nCategory: ${article.category}\nKeywords: ${article.keywords.join(", ")}\n${article.description.slice(0, 1200)}`;
+      if (article.fullText) {
+        entry += `\n\n[Full text excerpt]\n${article.fullText.slice(0, 1500)}`;
+      }
+      return entry;
+    })
     .join("\n\n---\n\n");
 
   const langInstruction =

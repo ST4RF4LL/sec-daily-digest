@@ -32,3 +32,13 @@ export function filterByHours<T extends { pubDate: Date }>(items: T[], hours: nu
   const cutoff = new Date(now.getTime() - hours * 60 * 60 * 1000);
   return items.filter((item) => item.pubDate.getTime() >= cutoff.getTime());
 }
+
+export function applyArchivePenalty<T extends { link: string; score: number }>(items: T[], seenUrls: Set<string>): T[] {
+  return items.map((item) => {
+    const normalized = normalizeUrl(item.link);
+    if (seenUrls.has(normalized)) {
+      return { ...item, score: Math.max(0, item.score - 5) };
+    }
+    return item;
+  });
+}

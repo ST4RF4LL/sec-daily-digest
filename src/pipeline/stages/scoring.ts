@@ -133,6 +133,7 @@ export async function scoreAndClassifyArticles(options: ScoreAndClassifyOptions)
                 description: article.description,
                 sourceName: article.sourceName,
                 link: article.link,
+                fullText: (article as { fullText?: string }).fullText,
               })),
             );
             const response = await options.provider!.call(prompt);
