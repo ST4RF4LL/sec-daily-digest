@@ -1,8 +1,11 @@
+# customize
+Forked from z3r0yu's sec-daily-digest. Removed the extra LLM interaction logic during `sec-digest.ts` execution — AI work is now delegated back to the calling LLM/Agent that invokes this skill. No need to configure BASE_URL or API_KEY in the runtime environment.
+
 # sec-daily-digest
 
 English is the primary README. Chinese version: [README.zh-CN.md](README.zh-CN.md).
 
-`sec-daily-digest` fetches recent articles from CyberSecurityRSS OPML feeds **and Twitter/X security / AI KOL accounts**, scores and filters them (AI-first with rule fallback), deduplicates against historical archives, merges vulnerability events, monitors source health, and generates a bilingual daily markdown digest for cybersecurity researchers.
+`sec-daily-digest` is an **AI Agent Skill** that fetches recent articles from CyberSecurityRSS OPML feeds **and Twitter/X security / AI KOL accounts**, deduplicates against historical archives, merges vulnerability events, monitors source health, and generates a bilingual daily markdown digest for cybersecurity researchers. AI scoring, summarization, and trend analysis are handled by **the calling LLM itself** — no external API keys required.
 
 ## 💬 One-Liner
 
@@ -14,16 +17,11 @@ The assistant fetches, scores, deduplicates, and renders a full Markdown report 
 
 More examples:
 
-> 🗣️ "Use Claude to analyze today's security news, output to ./output/digest.md"
+> 🗣️ "Analyze today's security news, output to ./output/digest.md"
 
 > 🗣️ "Generate this week's security roundup, skip Twitter, focus on CVEs"
 
-> 🗣️ "Full-text enrichment with Gemini scoring, email to me@example.com"
-
-Or via CLI:
-```bash
-bun scripts/sec-digest.ts --dry-run --output ./output/digest.md
-```
+> 🗣️ "Full-text enrichment, email digest to me@example.com"
 
 ## 📊 What You Get
 
@@ -38,15 +36,15 @@ An AI-scored, deduplicated cybersecurity digest from **dual data sources** (secu
 ### Pipeline
 
 ```
-RSS fetch + Twitter KOL fetch (parallel)
-        ↓
-  dedup + time filter → archive penalty (seen before −5)
-        ↓
-  full-text enrich (optional) → AI scoring + classification → AI summary + translation
-        ↓
-  vulnerability merge (CVE-first + semantic clustering)
-        ↓
-  render Markdown digest → email delivery (optional)
+① Script: RSS fetch + Twitter KOL fetch (parallel) → dedup + time filter + archive penalty
+         ↓ staging/fetched.json
+② Calling LLM: scores + classifies articles → staging/scores.json
+         ↓
+③ Script: apply scores, pick balanced top-N, merge vulns → staging/selected.json
+         ↓
+④ Calling LLM: summarizes + translates articles, generates trend highlights
+         ↓
+⑤ Script: render Markdown digest → email delivery (optional)
 ```
 
 **Quality scoring**: priority source (+3), archive penalty (−5), keyword weights, recency.
@@ -54,19 +52,21 @@ RSS fetch + Twitter KOL fetch (parallel)
 ## Highlights
 
 - TypeScript + Bun runtime, no new npm dependencies
+- **LLM-in-the-loop**: AI scoring, summarization and trend analysis are done by the calling LLM — no external API keys needed
+- **Multi-stage pipeline**: `fetch` → `select` → `render` subcommands with JSON staging files
 - **Dual source monitoring**: CyberSecurityRSS OPML + Twitter/X security KOLs (parallel fetch)
 - **Historical dedup**: articles seen in the past 7 days receive a −5 score penalty; archive auto-cleans after 90 days
 - **Source health monitoring**: tracks per-source fetch failures; surfaces unhealthy sources in digest footer
-- **Full-text enrichment** (`--enrich`): fetches article body before AI scoring for better classification
+- **Full-text enrichment** (`--enrich`): fetches article body before scoring for better classification
 - **Email delivery** (`--email`): sends digest via `gog`
 - Mandatory OPML update check before each run
   - Default profile: `tiny.opml`
   - Optional profile: `CyberSecurityRSS.opml` (`--opml full`)
   - On remote check failure: continue with cached OPML
-- Explicit provider selection: `--provider openai|gemini|claude|ollama` (default: `openai`)
 - Balanced ranking: Security 50% + AI 50%
 - Score display: `🔥N` (integer, 1–10 range)
 - Vulnerability merge: CVE-first + semantic clustering fallback
+- Graceful degradation: without LLM scores/summaries, falls back to rule-based scoring and text truncation
 - Output sections:
   - `## 📝 今日趋势` — macro trend highlights
   - `## 🔐 Security KOL Updates` — Twitter/X KOL tweets (when credentials present)
@@ -81,77 +81,104 @@ Persistent directory: `~/.sec-daily-digest/` (override with `SEC_DAILY_DIGEST_HO
 
 | File / Directory | Description |
 |-----------------|-------------|
-| `config.yaml` | Main config (provider, hours, top_n, weights…) |
+| `config.yaml` | Main config (hours, top_n, weights…) |
 | `sources.yaml` | Twitter/X KOL list + custom RSS sources |
 | `health.json` | Per-source fetch health history |
 | `archive/YYYY-MM-DD.json` | Daily article archive for historical dedup |
+| `staging/` | Intermediate JSON files between pipeline stages |
 | `twitter-id-cache.json` | Twitter user ID cache (official API only, 7-day TTL) |
 | `opml/tiny.opml` | Cached tiny OPML |
 | `opml/CyberSecurityRSS.opml` | Cached full OPML |
 
+## Quick Start (as Skill)
+
+The recommended way to use sec-daily-digest is as an AI Agent Skill. Install the skill (see [Install This Skill](#install-this-skill)) and tell your AI assistant:
+
+```text
+/sec-digest
+```
+
+The AI assistant will orchestrate all stages automatically.
+
 ## Quick Start (CLI)
+
+You can also run individual stages manually:
 
 ```bash
 cd /path/to/sec-daily-digest
 bun install
 
-# Dry run (no AI, no Twitter)
-bun scripts/sec-digest.ts --dry-run --output ./output/digest.md
+# Stage 1: Fetch articles
+bun scripts/sec-digest.ts fetch --hours 48 --opml tiny
 
-# With AI scoring
-OPENAI_API_KEY=sk-... bun scripts/sec-digest.ts \
-  --provider openai --opml tiny --hours 48 --output ./output/digest.md
+# Stage 2: (manually write scores.json or skip for rule-based fallback)
+
+# Stage 3: Select top articles
+bun scripts/sec-digest.ts select --top-n 20
+
+# Stage 4: (manually write summaries.json or skip for text truncation fallback)
+
+# Stage 5: Render digest
+bun scripts/sec-digest.ts render --output ./output/digest.md
 
 # With Twitter KOLs
-TWITTERAPI_IO_KEY=your-key bun scripts/sec-digest.ts \
-  --provider claude --output ./output/digest.md
+TWITTERAPI_IO_KEY=your-key bun scripts/sec-digest.ts fetch --hours 48
 
 # Weekly mode
-bun scripts/sec-digest.ts --mode weekly --provider openai --output ./output/weekly.md
+bun scripts/sec-digest.ts fetch --mode weekly
 
-# Full-featured
-TWITTERAPI_IO_KEY=your-key bun scripts/sec-digest.ts \
-  --provider claude --enrich --email me@example.com \
-  --output ./output/digest.md
+# With full-text enrichment
+bun scripts/sec-digest.ts fetch --enrich --hours 48
 ```
 
-## CLI Options
+## CLI Subcommands
+
+### `fetch` — Data Collection
+
+```bash
+bun scripts/sec-digest.ts fetch [options]
+```
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--provider <id>` | `openai\|gemini\|claude\|ollama` | `openai` |
 | `--opml <profile>` | `tiny\|full` | `tiny` |
 | `--hours <n>` | Time window in hours | `48` |
 | `--mode <daily\|weekly>` | Shortcut: daily=48h, weekly=168h | — |
-| `--top-n <n>` | Max articles to select | `20` |
-| `--output <path>` | Output markdown file path | `./output/sec-digest-YYYYMMDD.md` |
-| `--dry-run` | Rule-based scoring only (no AI calls) | false |
-| `--no-twitter` | Disable Twitter/X KOL fetching | false |
-| `--email <addr>` | Send digest via `gog` | — |
 | `--enrich` | Fetch full text before scoring | false |
-| `--help` | Show help | — |
+| `--no-twitter` | Disable Twitter/X KOL fetching | false |
+
+Output: `~/.sec-daily-digest/staging/fetched.json`
+
+### `select` — Score Application & Selection
+
+```bash
+bun scripts/sec-digest.ts select [options]
+```
+
+Reads `staging/fetched.json` + `staging/scores.json` (if present).
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--top-n <n>` | Max articles to select | `20` |
+
+Output: `~/.sec-daily-digest/staging/selected.json`
+
+### `render` — Markdown Generation
+
+```bash
+bun scripts/sec-digest.ts render [options]
+```
+
+Reads `staging/selected.json` + `staging/summaries.json` (if present).
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--output <path>` | Output markdown file path | `./output/sec-digest-YYYYMMDD.md` |
+| `--highlights <text>` | Trend summary text | (auto-generated fallback) |
+| `--highlights-file <path>` | Read highlights from file | — |
+| `--email <addr>` | Send digest via `gog` | — |
 
 ## Environment Variables
-
-### AI Providers
-
-**OpenAI** (default):
-- `OPENAI_API_KEY` (required)
-- `OPENAI_API_BASE` (optional)
-- `OPENAI_MODEL` (optional)
-
-**Gemini**:
-- `GEMINI_API_KEY` (required)
-- `GEMINI_MODEL` (optional)
-
-**Claude**:
-- `ANTHROPIC_API_KEY` (required)
-- `CLAUDE_MODEL` (optional)
-- `CLAUDE_API_BASE` (optional)
-
-**Ollama**:
-- `OLLAMA_API_BASE` (optional, default `http://127.0.0.1:11434`)
-- `OLLAMA_MODEL` (optional)
 
 ### Twitter/X
 
@@ -275,28 +302,13 @@ brew install steipete/tap/gogcli
 # Authenticate (one-time)
 gog auth login
 
-# Send digest via email
-bun scripts/sec-digest.ts --provider claude --email me@example.com --output ./output/digest.md
+# Send digest via email (in the render stage)
+bun scripts/sec-digest.ts render --email me@example.com --output ./output/digest.md
 ```
 
 Under the hood, the `--email` flag calls:
 ```bash
 gog gmail send --to <addr> --subject "sec-daily-digest YYYY-MM-DD" --body-file -
-```
-
-## cron Integration
-
-```bash
-# Daily at 07:00
-0 7 * * * cd /path/to/sec-daily-digest && \
-  bun scripts/sec-digest.ts --mode daily --output ~/digests/sec-$(date +\%Y\%m\%d).md \
-  2>&1 | tee -a ~/.sec-daily-digest/cron.log
-
-# Weekly on Monday at 08:00
-0 8 * * 1 cd /path/to/sec-daily-digest && \
-  bun scripts/sec-digest.ts --mode weekly --opml full \
-  --output ~/digests/weekly-$(date +\%Y\%m\%d).md \
-  2>&1 | tee -a ~/.sec-daily-digest/cron.log
 ```
 
 ## Install This Skill

@@ -1,19 +1,15 @@
 import { parseScoringResults } from "../../ai/parse";
-import { buildScoringPrompt } from "../../ai/prompts";
 import { fallbackScoreFromText, inferTopicSignals } from "../../ai/scoring";
-import type { AIProvider } from "../../ai/providers/types";
 import type { Article } from "../../rss/parse";
 import type { CategoryId, ScoredArticle, ScoringResultItem } from "../types";
 
-interface ScoreAndClassifyOptions {
+interface ApplyExternalScoresOptions {
   articles: Article[];
-  provider: AIProvider | null;
+  externalScores: ScoringResultItem[];
   weights: {
     security: number;
     ai: number;
   };
-  batchSize?: number;
-  maxConcurrency?: number;
 }
 
 function normalizeWeights(weights: { security: number; ai: number }): { security: number; ai: number } {
@@ -29,7 +25,7 @@ function normalizeWeights(weights: { security: number; ai: number }): { security
   };
 }
 
-function computeCompositeScore(input: ScoringResultItem, weights: { security: number; ai: number }): number {
+export function computeCompositeScore(input: ScoringResultItem, weights: { security: number; ai: number }): number {
   const normalized = normalizeWeights(weights);
   const topic = normalized.security * input.security + normalized.ai * input.ai;
   const qualityBlend = 0.5 * input.relevance + 0.5 * input.quality;
@@ -102,55 +98,18 @@ function fallbackResult(article: Article, index: number, weights: { security: nu
   };
 }
 
-function buildBatches<T>(items: T[], batchSize: number): T[][] {
-  const batches: T[][] = [];
-  for (let i = 0; i < items.length; i += batchSize) {
-    batches.push(items.slice(i, i + batchSize));
-  }
-  return batches;
-}
-
-export async function scoreAndClassifyArticles(options: ScoreAndClassifyOptions): Promise<ScoredArticle[]> {
-  const indexed = options.articles.map((article, index) => ({
-    index,
-    article,
-  }));
-  const batchSize = Math.max(1, options.batchSize ?? 10);
-  const maxConcurrency = Math.max(1, options.maxConcurrency ?? 2);
-  const parsedByIndex = new Map<number, ScoringResultItem>();
-  const batches = buildBatches(indexed, batchSize);
-
-  if (options.provider) {
-    for (let i = 0; i < batches.length; i += maxConcurrency) {
-      const group = batches.slice(i, i + maxConcurrency);
-      await Promise.all(
-        group.map(async (batch) => {
-          try {
-            const prompt = buildScoringPrompt(
-              batch.map(({ index, article }) => ({
-                index,
-                title: article.title,
-                description: article.description,
-                sourceName: article.sourceName,
-                link: article.link,
-                fullText: (article as { fullText?: string }).fullText,
-              })),
-            );
-            const response = await options.provider!.call(prompt);
-            const parsed = parseScoringResults(response);
-            for (const item of parsed) {
-              parsedByIndex.set(item.index, item);
-            }
-          } catch {
-            // Fall back per article below.
-          }
-        }),
-      );
-    }
+/**
+ * Apply externally-provided AI scores (from the calling LLM) to articles.
+ * Articles without a matching score entry fall back to rule-based scoring.
+ */
+export function applyExternalScores(options: ApplyExternalScoresOptions): ScoredArticle[] {
+  const scoreMap = new Map<number, ScoringResultItem>();
+  for (const item of options.externalScores) {
+    scoreMap.set(item.index, item);
   }
 
-  return indexed.map(({ index, article }) => {
-    const parsed = parsedByIndex.get(index);
+  return options.articles.map((article, index) => {
+    const parsed = scoreMap.get(index);
     if (!parsed) {
       return fallbackResult(article, index, options.weights);
     }
@@ -160,4 +119,16 @@ export async function scoreAndClassifyArticles(options: ScoreAndClassifyOptions)
       score: computeCompositeScore(parsed, options.weights),
     };
   });
+}
+
+/**
+ * Parse raw scores JSON text (from scores.json) and apply to articles.
+ */
+export function parseAndApplyScores(
+  articles: Article[],
+  scoresJsonText: string,
+  weights: { security: number; ai: number },
+): ScoredArticle[] {
+  const externalScores = parseScoringResults(scoresJsonText);
+  return applyExternalScores({ articles, externalScores, weights });
 }

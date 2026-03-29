@@ -1,8 +1,6 @@
-export type ProviderId = "openai" | "gemini" | "claude" | "ollama";
 export type OpmlProfile = "tiny" | "full";
 
 export interface SecDigestConfig {
-  provider: ProviderId;
   opml_profile: OpmlProfile;
   time_range_hours: number;
   top_n: number;
@@ -16,7 +14,6 @@ export interface SecDigestConfig {
 }
 
 export const DEFAULT_CONFIG: SecDigestConfig = {
-  provider: "openai",
   opml_profile: "tiny",
   time_range_hours: 48,
   top_n: 20,

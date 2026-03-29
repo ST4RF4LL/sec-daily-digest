@@ -2,7 +2,7 @@
 
 英文主文档请见 [README.md](README.md)。
 
-`sec-daily-digest` 从 CyberSecurityRSS 的 OPML 源**和 Twitter/X 安全/AI研究员账号**抓取最新内容，进行 AI 优先（失败可回退规则）的评分筛选，结合历史去重、漏洞事件聚合、数据源健康监控，生成面向网络空间安全研究员的中英混合日报。
+`sec-daily-digest` 是一个 **AI Agent Skill**，从 CyberSecurityRSS 的 OPML 源**和 Twitter/X 安全/AI 研究员账号**抓取最新内容，结合历史去重、漏洞事件聚合、数据源健康监控，生成面向网络空间安全研究员的中英混合日报。AI 评分、摘要和趋势分析由**调用方 LLM 直接完成** —— 无需额外配置 API Key。
 
 ## 💬 一句话上手
 
@@ -10,20 +10,15 @@
 
 > **"生成今天的网络安全日报，重点关注漏洞和 APT 动态"**
 
-助手会自动抓取订阅源、AI 评分去重、汇总漏洞——全程自动完成。
+助手会自动抓取订阅源、评分去重、摘要翻译、渲染日报——全程自动完成。
 
 更多示例：
 
-> 🗣️ "用 Claude 分析今日安全动态，输出到 ./output/digest.md"
+> 🗣️ "分析今日安全动态，输出到 ./output/digest.md"
 
 > 🗣️ "生成本周安全周报，跳过 Twitter，重点关注 CVE"
 
-> 🗣️ "带上全文抓取，用 Gemini 评分，发到邮箱 me@example.com"
-
-或直接通过 CLI：
-```bash
-bun scripts/sec-digest.ts --dry-run --output ./output/digest.md
-```
+> 🗣️ "带上全文抓取，发到邮箱 me@example.com"
 
 ## 📊 你会得到什么
 
@@ -38,15 +33,15 @@ bun scripts/sec-digest.ts --dry-run --output ./output/digest.md
 ### 数据管道
 
 ```
-RSS 抓取 + Twitter KOL 抓取（并行）
-        ↓
-  去重 + 时间过滤 → 历史存档惩罚（已见内容 −5 分）
-        ↓
-  全文抓取（可选）→ AI 评分 + 分类 → AI 摘要 + 翻译
-        ↓
-  漏洞事件聚合（CVE 匹配 + 语义聚类）
-        ↓
-  渲染 Markdown 日报 → 邮件分发（可选）
+① 脚本：RSS 抓取 + Twitter KOL 抓取（并行）→ 去重 + 时间过滤 + 存档惩罚
+         ↓ staging/fetched.json
+② 调用方 LLM：评分 + 分类 → staging/scores.json
+         ↓
+③ 脚本：应用评分、平衡选取 top-N、漏洞聚合 → staging/selected.json
+         ↓
+④ 调用方 LLM：摘要 + 翻译 + 趋势分析
+         ↓
+⑤ 脚本：渲染 Markdown 日报 → 邮件分发（可选）
 ```
 
 **质量评分**：优先级源 (+3)、历史去重惩罚 (−5)、关键词权重。
@@ -54,6 +49,8 @@ RSS 抓取 + Twitter KOL 抓取（并行）
 ## 主要特性
 
 - TypeScript + Bun 运行时，不引入新 npm 依赖
+- **LLM-in-the-loop**：AI 评分、摘要和趋势分析由调用方 LLM 直接完成——无需额外 API Key
+- **多阶段流水线**：`fetch` → `select` → `render` 三个子命令，通过 JSON 中间文件传递数据
 - **双源监控**：CyberSecurityRSS OPML + Twitter/X 安全研究员账号（并行抓取）
 - **历史去重**：过去 7 天出现过的文章降权 −5 分；存档文件 90 天后自动清理
 - **数据源健康监控**：记录每个数据源的抓取成败；失败率超过 50% 时在日报末尾报警
@@ -63,10 +60,10 @@ RSS 抓取 + Twitter KOL 抓取（并行）
   - 默认：`tiny.opml`
   - 可选：`CyberSecurityRSS.opml`（`--opml full`）
   - 远端检查失败时：继续执行并使用本地缓存 OPML
-- 显式 Provider 选择：`--provider openai|gemini|claude|ollama`（默认 `openai`）
 - 排序权重：安全 50% + AI 50%
 - 评分展示：`🔥N`（整数，范围 1–10）
 - 漏洞聚合：CVE 优先 + 语义聚类兜底
+- 渐进式降级：无 LLM 评分/摘要时，自动回退到规则评分和文本截断
 - 输出版块：
   - `## 📝 今日趋势` — 宏观趋势总结
   - `## 🔐 Security KOL Updates` — Twitter/X KOL 推文（有凭证时显示）
@@ -81,77 +78,104 @@ RSS 抓取 + Twitter KOL 抓取（并行）
 
 | 文件 / 目录 | 说明 |
 |------------|------|
-| `config.yaml` | 主配置（provider、hours、top_n、weights…） |
+| `config.yaml` | 主配置（hours、top_n、weights…） |
 | `sources.yaml` | Twitter/X KOL 列表 + 自定义 RSS 源 |
 | `health.json` | 各数据源抓取健康历史 |
 | `archive/YYYY-MM-DD.json` | 每日文章存档，用于历史去重 |
+| `staging/` | 流水线各阶段的 JSON 中间文件 |
 | `twitter-id-cache.json` | Twitter 用户 ID 缓存（仅官方 API，7 天 TTL） |
 | `opml/tiny.opml` | 精简 OPML 缓存 |
 | `opml/CyberSecurityRSS.opml` | 完整 OPML 缓存 |
 
+## 快速开始（作为 Skill）
+
+推荐使用方式是作为 AI Agent Skill。安装后（见 [Skill 安装方式](#skill-安装方式)），对你的 AI 助手说：
+
+```text
+/sec-digest
+```
+
+AI 助手会自动编排所有阶段。
+
 ## 快速开始（CLI）
+
+也可以手动运行各个阶段：
 
 ```bash
 cd /path/to/sec-daily-digest
 bun install
 
-# 纯规则评分（无 AI、无 Twitter）
-bun scripts/sec-digest.ts --dry-run --output ./output/digest.md
+# 阶段 1：抓取文章
+bun scripts/sec-digest.ts fetch --hours 48 --opml tiny
 
-# 带 AI 评分
-OPENAI_API_KEY=sk-... bun scripts/sec-digest.ts \
-  --provider openai --opml tiny --hours 48 --output ./output/digest.md
+# 阶段 2：（手动写入 scores.json 或跳过以使用规则评分兜底）
+
+# 阶段 3：选取精华文章
+bun scripts/sec-digest.ts select --top-n 20
+
+# 阶段 4：（手动写入 summaries.json 或跳过以使用文本截断兜底）
+
+# 阶段 5：渲染日报
+bun scripts/sec-digest.ts render --output ./output/digest.md
 
 # 带 Twitter KOL
-TWITTERAPI_IO_KEY=your-key bun scripts/sec-digest.ts \
-  --provider claude --output ./output/digest.md
+TWITTERAPI_IO_KEY=your-key bun scripts/sec-digest.ts fetch --hours 48
 
 # 周报模式
-bun scripts/sec-digest.ts --mode weekly --provider openai --output ./output/weekly.md
+bun scripts/sec-digest.ts fetch --mode weekly
 
-# 全功能
-TWITTERAPI_IO_KEY=your-key bun scripts/sec-digest.ts \
-  --provider claude --enrich --email me@example.com \
-  --output ./output/digest.md
+# 带全文抓取
+bun scripts/sec-digest.ts fetch --enrich --hours 48
 ```
 
-## 参数
+## CLI 子命令
+
+### `fetch` — 数据采集
+
+```bash
+bun scripts/sec-digest.ts fetch [选项]
+```
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--provider <id>` | `openai\|gemini\|claude\|ollama` | `openai` |
 | `--opml <profile>` | `tiny\|full` | `tiny` |
 | `--hours <n>` | 时间窗口（小时） | `48` |
 | `--mode <daily\|weekly>` | 快捷方式：daily=48h，weekly=168h | — |
-| `--top-n <n>` | 最多选取文章数 | `20` |
-| `--output <path>` | 输出 markdown 路径 | `./output/sec-digest-YYYYMMDD.md` |
-| `--dry-run` | 仅规则评分，不调用外部 AI | false |
-| `--no-twitter` | 禁用 Twitter/X KOL 抓取 | false |
-| `--email <addr>` | 通过 `gog` 发送日报 | — |
 | `--enrich` | 评分前抓取全文 | false |
-| `--help` | 显示帮助 | — |
+| `--no-twitter` | 禁用 Twitter/X KOL 抓取 | false |
+
+输出：`~/.sec-daily-digest/staging/fetched.json`
+
+### `select` — 评分应用 & 文章选取
+
+```bash
+bun scripts/sec-digest.ts select [选项]
+```
+
+读取 `staging/fetched.json` + `staging/scores.json`（如果存在）。
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--top-n <n>` | 最多选取文章数 | `20` |
+
+输出：`~/.sec-daily-digest/staging/selected.json`
+
+### `render` — Markdown 渲染
+
+```bash
+bun scripts/sec-digest.ts render [选项]
+```
+
+读取 `staging/selected.json` + `staging/summaries.json`（如果存在）。
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--output <path>` | 输出 markdown 路径 | `./output/sec-digest-YYYYMMDD.md` |
+| `--highlights <text>` | 趋势总结文本 | （自动生成兜底） |
+| `--highlights-file <path>` | 从文件读取趋势总结 | — |
+| `--email <addr>` | 通过 `gog` 发送日报 | — |
 
 ## 环境变量
-
-### AI Provider
-
-**OpenAI**（默认）：
-- `OPENAI_API_KEY`（必填）
-- `OPENAI_API_BASE`（可选）
-- `OPENAI_MODEL`（可选）
-
-**Gemini**：
-- `GEMINI_API_KEY`（必填）
-- `GEMINI_MODEL`（可选）
-
-**Claude**：
-- `ANTHROPIC_API_KEY`（必填）
-- `CLAUDE_MODEL`（可选）
-- `CLAUDE_API_BASE`（可选）
-
-**Ollama**：
-- `OLLAMA_API_BASE`（可选，默认 `http://127.0.0.1:11434`）
-- `OLLAMA_MODEL`（可选）
 
 ### Twitter/X
 
@@ -275,28 +299,13 @@ brew install steipete/tap/gogcli
 # 一次性授权
 gog auth login
 
-# 发送日报
-bun scripts/sec-digest.ts --provider claude --email me@example.com --output ./output/digest.md
+# 在 render 阶段发送日报
+bun scripts/sec-digest.ts render --email me@example.com --output ./output/digest.md
 ```
 
 `--email` 标志内部调用：
 ```bash
 gog gmail send --to <addr> --subject "sec-daily-digest YYYY-MM-DD" --body-file -
-```
-
-## cron 定时任务
-
-```bash
-# 每天 07:00 生成日报
-0 7 * * * cd /path/to/sec-daily-digest && \
-  bun scripts/sec-digest.ts --mode daily --output ~/digests/sec-$(date +\%Y\%m\%d).md \
-  2>&1 | tee -a ~/.sec-daily-digest/cron.log
-
-# 每周一 08:00 生成周报
-0 8 * * 1 cd /path/to/sec-daily-digest && \
-  bun scripts/sec-digest.ts --mode weekly --opml full \
-  --output ~/digests/weekly-$(date +\%Y\%m\%d).md \
-  2>&1 | tee -a ~/.sec-daily-digest/cron.log
 ```
 
 ## Skill 安装方式

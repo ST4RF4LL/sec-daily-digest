@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { runPipeline } from "../../src/pipeline/run";
+import { runFetch, runSelect, runRender } from "../../src/pipeline/run";
 
 describe("sec-digest e2e", () => {
-  test("generates digest with merged vulnerability references", async () => {
+  test("full pipeline with fixture data produces valid digest", async () => {
     const workspace = await mkdtemp(path.join(os.tmpdir(), "sec-e2e-"));
     const outputPath = path.join(workspace, "digest.md");
     const opmlFixture = await readFile(path.join(process.cwd(), "tests/fixtures/tiny.opml"), "utf8");
@@ -22,19 +22,33 @@ describe("sec-digest e2e", () => {
       return new Response("not found", { status: 404 });
     };
 
-    const result = await runPipeline({
-      dryRun: true,
-      outputPath,
-      env: {
-        SEC_DAILY_DIGEST_HOME: workspace,
-      } as NodeJS.ProcessEnv,
+    const env = { SEC_DAILY_DIGEST_HOME: workspace } as NodeJS.ProcessEnv;
+    const now = new Date("2026-02-27T12:00:00.000Z");
+
+    // Stage 1: Fetch
+    const fetchResult = await runFetch({
+      env,
       fetcher,
-      now: new Date("2026-02-27T12:00:00.000Z"),
+      now,
+    });
+    expect(fetchResult.articles.length).toBe(2);
+
+    // Stage 2: skip external scores (use rule fallback)
+
+    // Stage 3: Select
+    await runSelect({ env });
+
+    // Stage 4: skip external summaries (use fallback)
+
+    // Stage 5: Render
+    const renderResult = await runRender({
+      outputPath,
+      env,
     });
 
     const markdown = await readFile(outputPath, "utf8");
-    expect(result.counters.articles).toBe(2);
-    expect(result.counters.selected).toBeGreaterThan(0);
+    expect(renderResult.counters.articles).toBe(2);
+    expect(renderResult.counters.selected).toBeGreaterThan(0);
     expect(markdown).toContain("今日趋势");
     expect(markdown).toContain("漏洞专报");
     expect(markdown).toContain("CVE-2026-77777");

@@ -4,7 +4,7 @@ import { getStateRoot } from "../../src/config/paths";
 describe("getStateRoot", () => {
   test("uses ~/.sec-daily-digest by default", () => {
     const root = getStateRoot({});
-    expect(root.endsWith("/.sec-daily-digest")).toBe(true);
+    expect(root).toMatch(/[/\\]\.sec-daily-digest$/);
   });
 
   test("supports SEC_DAILY_DIGEST_HOME override", () => {

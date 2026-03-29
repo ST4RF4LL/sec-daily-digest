@@ -1,15 +1,5 @@
 import { parseSummaryResults } from "../../ai/parse";
-import { buildSummaryPrompt } from "../../ai/prompts";
-import type { AIProvider } from "../../ai/providers/types";
-import type { FinalArticle, ScoredArticle } from "../types";
-
-interface SummarizeSelectedOptions {
-  articles: ScoredArticle[];
-  provider: AIProvider | null;
-  lang: "zh" | "en";
-  batchSize?: number;
-  maxConcurrency?: number;
-}
+import type { FinalArticle, ScoredArticle, SummaryResultItem } from "../types";
 
 function toFallbackSummary(text: string): string {
   const trimmed = text.trim();
@@ -19,62 +9,21 @@ function toFallbackSummary(text: string): string {
   return `${trimmed.slice(0, 220)}...`;
 }
 
-function buildBatches<T>(items: T[], batchSize: number): T[][] {
-  const batches: T[][] = [];
-  for (let i = 0; i < items.length; i += batchSize) {
-    batches.push(items.slice(i, i + batchSize));
-  }
-  return batches;
-}
-
-export async function summarizeSelectedArticles(options: SummarizeSelectedOptions): Promise<FinalArticle[]> {
-  const batchSize = Math.max(1, options.batchSize ?? 10);
-  const maxConcurrency = Math.max(1, options.maxConcurrency ?? 2);
-  const indexed = options.articles.map((article, index) => ({
-    index,
-    article,
-  }));
-  const byIndex = new Map<number, { titleZh: string; summaryZh: string; reasonZh: string }>();
-
-  if (options.provider) {
-    const batches = buildBatches(indexed, batchSize);
-    for (let i = 0; i < batches.length; i += maxConcurrency) {
-      const group = batches.slice(i, i + maxConcurrency);
-      await Promise.all(
-        group.map(async (batch) => {
-          try {
-            const prompt = buildSummaryPrompt(
-              batch.map(({ index, article }) => ({
-                index,
-                title: article.title,
-                description: article.description,
-                sourceName: article.sourceName,
-                link: article.link,
-                category: article.category,
-                keywords: article.keywords,
-                fullText: (article as { fullText?: string }).fullText,
-              })),
-              options.lang,
-            );
-            const response = await options.provider!.call(prompt);
-            const parsed = parseSummaryResults(response);
-            for (const item of parsed) {
-              byIndex.set(item.index, {
-                titleZh: item.titleZh,
-                summaryZh: item.summaryZh,
-                reasonZh: item.reasonZh,
-              });
-            }
-          } catch {
-            // Fall back below.
-          }
-        }),
-      );
-    }
+/**
+ * Apply externally-provided AI summaries (from the calling LLM) to scored articles.
+ * Articles without a matching summary entry fall back to truncated original text.
+ */
+export function applyExternalSummaries(
+  articles: ScoredArticle[],
+  externalSummaries: SummaryResultItem[],
+): FinalArticle[] {
+  const summaryMap = new Map<number, SummaryResultItem>();
+  for (const item of externalSummaries) {
+    summaryMap.set(item.index, item);
   }
 
-  return indexed.map(({ index, article }) => {
-    const parsed = byIndex.get(index);
+  return articles.map((article, index) => {
+    const parsed = summaryMap.get(index);
     const fallbackSummary = toFallbackSummary(article.description || article.title);
     return {
       ...article,
@@ -84,4 +33,15 @@ export async function summarizeSelectedArticles(options: SummarizeSelectedOption
       reasonZh: parsed?.reasonZh?.trim() || "",
     };
   });
+}
+
+/**
+ * Parse raw summaries JSON text (from summaries.json) and apply to articles.
+ */
+export function parseAndApplySummaries(
+  articles: ScoredArticle[],
+  summariesJsonText: string,
+): FinalArticle[] {
+  const externalSummaries = parseSummaryResults(summariesJsonText);
+  return applyExternalSummaries(articles, externalSummaries);
 }

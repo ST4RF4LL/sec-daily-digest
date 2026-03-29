@@ -17,24 +17,24 @@ describe("loadConfig", () => {
 
   test("uses defaults when config file is missing", async () => {
     const cfg = await loadConfig({}, { SEC_DAILY_DIGEST_HOME: tempRoot } as NodeJS.ProcessEnv);
-    expect(cfg.provider).toBe("openai");
     expect(cfg.opml_profile).toBe("tiny");
     expect(cfg.time_range_hours).toBe(48);
+    expect(cfg.top_n).toBe(20);
   });
 
-  test("CLI provider overrides YAML provider", async () => {
+  test("CLI options override YAML config", async () => {
     await writeFile(
       path.join(tempRoot, "config.yaml"),
-      "provider: gemini\nopml_profile: full\ntime_range_hours: 24\ntop_n: 10\n",
+      "opml_profile: full\ntime_range_hours: 24\ntop_n: 10\n",
       "utf8",
     );
 
     const cfg = await loadConfig(
-      { provider: "claude" },
+      { opml_profile: "tiny" },
       { SEC_DAILY_DIGEST_HOME: tempRoot } as NodeJS.ProcessEnv,
     );
-    expect(cfg.provider).toBe("claude");
-    expect(cfg.opml_profile).toBe("full");
+    expect(cfg.opml_profile).toBe("tiny");
+    expect(cfg.time_range_hours).toBe(24);
   });
 
   test("persists merged config to config.yaml", async () => {

@@ -12,10 +12,6 @@ function sanitizeConfig(raw: unknown): ConfigPatch {
   const obj = raw as Record<string, unknown>;
   const patch: ConfigPatch = {};
 
-  if (obj.provider === "openai" || obj.provider === "gemini" || obj.provider === "claude" || obj.provider === "ollama") {
-    patch.provider = obj.provider;
-  }
-
   if (obj.opml_profile === "tiny" || obj.opml_profile === "full") {
     patch.opml_profile = obj.opml_profile;
   }
