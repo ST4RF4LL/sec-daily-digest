@@ -1,3 +1,6 @@
+# customize
+魔改了z3r0yu的sec-daily-digest，去掉了`sec-digest.ts`执行过程中和额外的LLM交互的逻辑，改由返回给调用这个skill的LLM/Agent处理信息，所以使用skill时不用在运行环境里额外配置BASE_URL和API_KEY
+
 # sec-daily-digest
 
 英文主文档请见 [README.md](README.md)。
